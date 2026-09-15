@@ -27,7 +27,7 @@ function erroDe(error, status) {
 export function traduzirErro(msg) {
   const m = String(msg || '');
   if (/Invalid login credentials/i.test(m)) return 'E-mail ou senha incorretos.';
-  if (/Email not confirmed/i.test(m)) return 'Confirme o e-mail com o código que enviamos antes de entrar.';
+  if (/Email not confirmed/i.test(m)) return 'Confirme o cadastro tocando no link do e-mail "Confirm your signup" antes de entrar.';
   if (/User already registered/i.test(m)) return 'Este e-mail já tem cadastro. Use "Entrar" ou "Esqueci a senha".';
   if (/Password should be at least/i.test(m)) return 'A senha precisa ter pelo menos 8 caracteres.';
   if (/Token has expired or is invalid/i.test(m)) return 'Código inválido ou vencido. Peça um novo código.';
@@ -162,7 +162,11 @@ const auth = {
     return data;
   },
   async register({ email, password }) {
-    const { data, error } = await supabase.auth.signUp({ email: email.trim().toLowerCase(), password });
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+      options: { emailRedirectTo: `${window.location.origin}${BASE}` },
+    });
     if (error) throw erroDe(error);
     if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
       throw erroDe({ message: 'User already registered' });
@@ -176,18 +180,23 @@ const auth = {
   },
   setToken() {},
   async resendOtp(email) {
-    const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim().toLowerCase() });
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim().toLowerCase(),
+      options: { emailRedirectTo: `${window.location.origin}${BASE}` },
+    });
     if (error) throw erroDe(error);
   },
   async resetPasswordRequest(email) {
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: `${window.location.origin}${BASE}reset-password`,
+    });
     if (error) throw erroDe(error);
   },
-  async resetPassword({ email, code, newPassword }) {
-    const { error: e1 } = await supabase.auth.verifyOtp({ email: email.trim().toLowerCase(), token: code, type: 'recovery' });
-    if (e1) throw erroDe(e1);
-    const { error: e2 } = await supabase.auth.updateUser({ password: newPassword });
-    if (e2) throw erroDe(e2);
+  // Chamado com a sessão aberta pelo link do e-mail de nova senha
+  async resetPassword({ newPassword }) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw erroDe(error);
   },
 };
 

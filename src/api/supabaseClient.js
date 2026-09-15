@@ -8,7 +8,9 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false,
+    // Os e-mails de confirmação e de nova senha trazem um link que volta para o app com a sessão no endereço
+    detectSessionInUrl: true,
+    flowType: 'implicit',
     storageKey: 'girocheque-auth',
   },
 });

@@ -1,25 +1,20 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
-import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UserPlus, Mail, Lock, Loader2 } from "lucide-react";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import AuthLayout from "@/components/AuthLayout";
 import { toast } from "@/components/ui/use-toast";
 
 export default function Register() {
-  const navigate = useNavigate();
-  const { checkUserAuth } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showOtp, setShowOtp] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
+  const [enviado, setEnviado] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,23 +30,9 @@ export default function Register() {
     setLoading(true);
     try {
       await base44.auth.register({ email, password });
-      setShowOtp(true);
+      setEnviado(true);
     } catch (err) {
       setError(err.message || "Não foi possível criar o cadastro.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerify = async () => {
-    setError("");
-    setLoading(true);
-    try {
-      await base44.auth.verifyOtp({ email, otpCode });
-      await checkUserAuth();
-      navigate("/", { replace: true });
-    } catch (err) {
-      setError(err.message || "Código inválido.");
     } finally {
       setLoading(false);
     }
@@ -61,63 +42,38 @@ export default function Register() {
     setError("");
     try {
       await base44.auth.resendOtp(email);
-      toast({ title: "Código reenviado", description: "Confira seu e-mail, inclusive a caixa de spam." });
+      toast({ title: "E-mail reenviado", description: "Confira a caixa de entrada e o lixo eletrônico." });
     } catch (err) {
-      setError(err.message || "Não foi possível reenviar o código.");
+      setError(err.message || "Não foi possível reenviar o e-mail.");
     }
   };
 
-  if (showOtp) {
+  if (enviado) {
     return (
       <AuthLayout
         icon={Mail}
         title="Confirme seu e-mail"
-        subtitle={`Enviamos um código de 6 dígitos para ${email}`}
+        subtitle={`Enviamos um e-mail para ${email}`}
+        footer={
+          <Link to="/login" className="text-primary font-medium hover:underline">
+            Voltar para entrar
+          </Link>
+        }
       >
         {error && (
           <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
             {error}
           </div>
         )}
-        <div className="flex justify-center mb-6">
-          <InputOTP
-            maxLength={6}
-            value={otpCode}
-            onChange={setOtpCode}
-            autoFocus
-            autoComplete="one-time-code"
-            inputMode="numeric"
-          >
-            <InputOTPGroup>
-              <InputOTPSlot index={0} />
-              <InputOTPSlot index={1} />
-              <InputOTPSlot index={2} />
-              <InputOTPSlot index={3} />
-              <InputOTPSlot index={4} />
-              <InputOTPSlot index={5} />
-            </InputOTPGroup>
-          </InputOTP>
+        <div className="space-y-3 text-sm text-foreground">
+          <p>1. Abra o e-mail com o assunto <strong>"Confirm your signup"</strong> (vem em inglês, do Supabase).</p>
+          <p>2. Toque no link <strong>"Confirm your mail"</strong>.</p>
+          <p>3. O GiroCheque abre com a sua conta ativa.</p>
+          <p className="text-muted-foreground">Não achou? Olhe o lixo eletrônico.</p>
         </div>
-        <Button
-          className="w-full h-12 font-medium"
-          onClick={handleVerify}
-          disabled={loading || otpCode.length < 6}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Confirmando...
-            </>
-          ) : (
-            "Confirmar"
-          )}
+        <Button variant="outline" className="w-full h-12 font-medium mt-6" onClick={handleResend}>
+          Reenviar e-mail
         </Button>
-        <p className="text-center text-sm text-muted-foreground mt-4">
-          Não chegou?{" "}
-          <button onClick={handleResend} className="text-primary font-medium hover:underline">
-            Reenviar código
-          </button>
-        </p>
       </AuthLayout>
     );
   }
@@ -197,7 +153,7 @@ export default function Register() {
           {loading ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Enviando código...
+              Enviando...
             </>
           ) : (
             "Criar senha"
