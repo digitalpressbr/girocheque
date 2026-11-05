@@ -143,9 +143,8 @@ export default function Configuracoes() {
       toast({ title: "Convite enviado", description: "O e-mail saiu para " + email + "." });
     } else {
       toast({
-        title: "Convite liberado, e-mail não saiu",
-        description: "Use Compartilhar no convite para mandar o link por WhatsApp.",
-        variant: "destructive",
+        title: r?.motivo === "sem_senha_app" ? "Envio automático de e-mail ainda não ligado" : "O e-mail não saiu",
+        description: "O acesso de " + email + " está liberado. Toque em Compartilhar para mandar o link pelo WhatsApp.",
       });
     }
   };
@@ -485,7 +484,7 @@ export default function Configuracoes() {
                     {c.situacao === "pendente" ? (
                       <>
                         <div className="flex items-center gap-1 mt-1.5 text-[11px] font-semibold">
-                          {c.email_status === "enviado" ? (
+                          {c.email_enviado_em ? (
                             <span className="inline-flex items-center gap-1 text-[#B7791F]">
                               <Clock size={12} /> Aguardando aceite · e-mail enviado em {formatDate(c.email_enviado_em)}
                             </span>
