@@ -247,10 +247,26 @@ const functions = {
 };
 
 const users = {
+  // Libera o e-mail e manda o convite pelo Gmail da Digital Press (função enviar-convite).
+  // Volta { enviado, motivo, ja_tem_conta }.
   async inviteUser(email) {
-    const { error } = await supabase.from('convites').upsert({ email: String(email).trim().toLowerCase() });
+    const { data, error } = await supabase.functions.invoke('enviar-convite', {
+      body: { email: String(email).trim().toLowerCase() },
+    });
+    if (error) {
+      let msg = 'Não foi possível convidar.';
+      try { msg = (await error.context.json()).error || msg; } catch { /* sem corpo */ }
+      throw new Error(msg);
+    }
+    return data || { ok: true };
+  },
+  async listarConvites() {
+    const { data, error } = await supabase
+      .from('convites')
+      .select('email,convidado_em,email_enviado_em,email_status,envios')
+      .order('convidado_em', { ascending: false });
     if (error) throw erroDe(error);
-    return { ok: true };
+    return data || [];
   },
 };
 

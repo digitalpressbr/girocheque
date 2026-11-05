@@ -5,7 +5,7 @@ import ActiveUsersSummary from "@/components/ActiveUsersSummary";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { isOwnerEmail, normalizeEmail, OWNER_EMAIL } from "@/lib/userIsolation";
-import { inviteUserThroughRuntime, buildAdminUserSummary, findInvitedUser } from "@/lib/adminUsers";
+import { inviteUserThroughRuntime, buildAdminUserSummary } from "@/lib/adminUsers";
 import { useResponsaveis } from "@/hooks/useResponsaveis";
 import { canDeleteResponsavel } from "@/lib/responsaveis";
 import ResponsavelManagerRow from "@/components/ResponsavelManagerRow";
@@ -19,7 +19,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Loader2, LogOut, Plus, UserCog, Users, ShieldAlert, CheckCircle2, Ban, RotateCcw,
+  ChevronDown, Mail, MailWarning, Clock, Share2,
 } from "lucide-react";
+
+const LINK_APP = "https://digitalpressbr.github.io/girocheque/";
+const TEXTO_CONVITE = "Você foi convidado para usar o GiroCheque. Abra " + LINK_APP +
+  " no Safari, toque no ícone de baixar no topo e siga Compartilhar > Adicionar à Tela de Início > Adicionar. " +
+  "Depois abra pelo ícone, toque em \"Primeiro acesso? Criar senha\" e use o e-mail convidado. " +
+  "Quando aparecer \"Avisar os vencimentos?\", toque em Ativar avisos e depois em Permitir.";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -52,6 +59,19 @@ export default function Configuracoes() {
   const [suspendMotivo, setSuspendMotivo] = useState("");
   const [suspendSaving, setSuspendSaving] = useState(false);
   const [actionUser, setActionUser] = useState(null);
+  const [convites, setConvites] = useState([]);
+  const [filtroConvite, setFiltroConvite] = useState("pendente");
+  const [verSuspensos, setVerSuspensos] = useState(false);
+  const [reenviando, setReenviando] = useState(null);
+
+  const loadConvites = useCallback(async () => {
+    if (!isOwner) return;
+    try {
+      setConvites(await base44.users.listarConvites());
+    } catch {
+      /* a lista de usuários continua aparecendo */
+    }
+  }, [isOwner]);
 
   const loadUsers = useCallback(async () => {
     if (!isOwner) return [];
@@ -70,8 +90,11 @@ export default function Configuracoes() {
   }, [isOwner, toast]);
 
   useEffect(() => {
-    if (isOwner) loadUsers();
-  }, [isOwner, loadUsers]);
+    if (isOwner) {
+      loadUsers();
+      loadConvites();
+    }
+  }, [isOwner, loadUsers, loadConvites]);
 
   const handleAddResp = async () => {
     const nome = novoNome.trim();
@@ -113,6 +136,20 @@ export default function Configuracoes() {
     }
   };
 
+  const avisarEnvio = (r, email) => {
+    if (r?.ja_tem_conta) {
+      toast({ title: "Usuário já tem conta", description: "O acesso de " + email + " está ativo." });
+    } else if (r?.enviado) {
+      toast({ title: "Convite enviado", description: "O e-mail saiu para " + email + "." });
+    } else {
+      toast({
+        title: "Convite liberado, e-mail não saiu",
+        description: "Use Compartilhar no convite para mandar o link por WhatsApp.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleInvite = async () => {
     const email = normalizeEmail(inviteEmail);
     if (!EMAIL_RE.test(email)) {
@@ -121,29 +158,54 @@ export default function Configuracoes() {
     }
     setInviting(true);
     try {
-      await inviteUserThroughRuntime(base44, email);
-      const freshUsers = await loadUsers();
-      const found = findInvitedUser(freshUsers, email);
-      if (found && found.acesso_ativo !== true) {
-        await base44.entities.User.update(found.id, {
-          acesso_ativo: true,
-          data_suspensao: null,
-          motivo_suspensao: null,
-        });
-        await loadUsers();
-        toast({ title: "Usuário convidado e ativado" });
-      } else if (found && found.acesso_ativo === true) {
-        toast({ title: "Usuário já ativo", description: "O convite foi reenviado." });
-      } else {
-        toast({ title: "Convite enviado", description: "Ativação pendente — o usuário ainda não aceitou." });
-      }
+      const r = await inviteUserThroughRuntime(base44, email);
+      await Promise.all([loadUsers(), loadConvites()]);
+      setFiltroConvite(r?.ja_tem_conta ? "aceito" : "pendente");
+      avisarEnvio(r, email);
       setInviteEmail("");
     } catch (e) {
-      toast({ title: "Não foi possível convidar", description: "Tente novamente.", variant: "destructive" });
+      toast({ title: "Não foi possível convidar", description: e?.message || "Tente novamente.", variant: "destructive" });
     } finally {
       setInviting(false);
     }
   };
+
+  const reenviar = async (email) => {
+    setReenviando(email);
+    try {
+      const r = await inviteUserThroughRuntime(base44, email);
+      await loadConvites();
+      avisarEnvio(r, email);
+    } catch (e) {
+      toast({ title: "Não foi possível reenviar", description: e?.message, variant: "destructive" });
+    } finally {
+      setReenviando(null);
+    }
+  };
+
+  const compartilhar = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "GiroCheque", text: TEXTO_CONVITE });
+        return;
+      }
+      await navigator.clipboard.writeText(TEXTO_CONVITE);
+      toast({ title: "Convite copiado", description: "Cole no WhatsApp da pessoa." });
+    } catch { /* a pessoa cancelou */ }
+  };
+
+  const perfilPorEmail = new Map(users.map((u) => [normalizeEmail(u.email), u]));
+  const convitesComSituacao = convites.map((c) => {
+    const p = perfilPorEmail.get(normalizeEmail(c.email));
+    const situacao = !p ? "pendente" : p.acesso_ativo ? "aceito" : "suspenso";
+    return { ...c, perfil: p, situacao };
+  });
+  const convitesPendentes = convitesComSituacao.filter((c) => c.situacao === "pendente");
+  const convitesAceitos = convitesComSituacao.filter((c) => c.situacao !== "pendente");
+  const convitesVisiveis = filtroConvite === "pendente" ? convitesPendentes : convitesAceitos;
+
+  const usuariosAtivos = users.filter((u) => isOwnerEmail(u.email) || u.acesso_ativo === true);
+  const usuariosSuspensos = users.filter((u) => !(isOwnerEmail(u.email) || u.acesso_ativo === true));
 
   const adminSummary = buildAdminUserSummary(users, OWNER_EMAIL);
 
@@ -187,6 +249,63 @@ export default function Configuracoes() {
     } finally {
       setActionUser(null);
     }
+  };
+
+  const renderUsuario = (u) => {
+                const ownerSelf = isOwnerEmail(u.email);
+                const ativo = ownerSelf || u.acesso_ativo === true;
+                const suspenso = !ativo && !!u.data_suspensao;
+                return (
+                  <li key={u.id} className="bg-white rounded-2xl border border-gray-100 p-3">
+                    <div className="flex items-start justify-between gap-3 min-w-0">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-[#1F2937] break-words">
+                          {u.full_name || "Sem nome"}
+                          {ownerSelf && <span className="ml-1.5 text-[10px] font-semibold text-[#0F6B4F]">(você)</span>}
+                        </p>
+                        <p className="text-xs text-gray-500 break-words">{u.email || "—"}</p>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          {ativo ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#16A36A]">
+                              <CheckCircle2 size={12} /> Ativo
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#C2414B]">
+                              <Ban size={12} /> Suspenso{u.data_suspensao ? " · " + formatDate(u.data_suspensao) : ""}
+                            </span>
+                          )}
+                        </div>
+                        {suspenso && u.motivo_suspensao && (
+                          <p className="text-[11px] text-gray-500 mt-1 break-words">Motivo: {u.motivo_suspensao}</p>
+                        )}
+                      </div>
+                      <div className="shrink-0">
+                        {ownerSelf ? (
+                          <span className="text-[11px] text-gray-300 font-medium">Protegido</span>
+                        ) : ativo ? (
+                          <Button
+                            variant="outline"
+                            onClick={() => openSuspend(u)}
+                            className="h-10 min-h-[40px] rounded-xl text-xs font-semibold text-[#C2414B] border-[#C2414B]/30 hover:bg-[#C2414B]/5"
+                          >
+                            <Ban size={14} className="mr-1" />
+                            Suspender
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            onClick={() => handleReactivate(u)}
+                            disabled={actionUser === u.id}
+                            className="h-10 min-h-[40px] rounded-xl text-xs font-semibold text-[#0F6B4F] border-[#0F6B4F]/30 hover:bg-[#0F6B4F]/5"
+                          >
+                            {actionUser === u.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} className="mr-1" />}
+                            Reativar
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
   };
 
   return (
@@ -328,75 +447,111 @@ export default function Configuracoes() {
               </Button>
             </div>
             <p className="text-[11px] text-gray-400 mt-1.5 break-words">
-              O usuário será ativado automaticamente se já estiver registrado; caso contrário, o convite ficará pendente.
+              A pessoa recebe o e-mail do GiroCheque com o link e o passo a passo. O convite fica pendente até ela criar a senha.
             </p>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-3">
+            <p className="text-sm font-medium text-gray-700 mb-2">Convites</p>
+            <div className="grid grid-cols-2 gap-2 mb-3" role="tablist">
+              {[
+                ["pendente", "Pendentes", convitesPendentes.length],
+                ["aceito", "Aceitos", convitesAceitos.length],
+              ].map(([chave, rotulo, n]) => (
+                <button
+                  key={chave}
+                  type="button"
+                  role="tab"
+                  aria-selected={filtroConvite === chave}
+                  onClick={() => setFiltroConvite(chave)}
+                  className={"min-h-11 rounded-xl text-sm font-semibold border " + (filtroConvite === chave
+                    ? "bg-[#0F6B4F] text-white border-[#0F6B4F]"
+                    : "bg-white text-gray-600 border-gray-200")}
+                >
+                  {rotulo} ({n})
+                </button>
+              ))}
+            </div>
+            {convitesVisiveis.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-3">
+                {filtroConvite === "pendente" ? "Nenhum convite esperando aceite." : "Nenhum convite aceito ainda."}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {convitesVisiveis.map((c) => (
+                  <li key={c.email} className="rounded-xl border border-gray-100 p-3">
+                    <p className="text-sm font-semibold text-[#1F2937] break-all">{c.email}</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">Convidado em {formatDate(c.convidado_em)}</p>
+                    {c.situacao === "pendente" ? (
+                      <>
+                        <div className="flex items-center gap-1 mt-1.5 text-[11px] font-semibold">
+                          {c.email_status === "enviado" ? (
+                            <span className="inline-flex items-center gap-1 text-[#B7791F]">
+                              <Clock size={12} /> Aguardando aceite · e-mail enviado em {formatDate(c.email_enviado_em)}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[#C2414B]">
+                              <MailWarning size={12} /> Aguardando aceite · e-mail não enviado
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => reenviar(c.email)}
+                            disabled={reenviando === c.email}
+                            className="min-h-11 rounded-xl text-xs font-semibold"
+                          >
+                            {reenviando === c.email ? <Loader2 size={14} className="animate-spin mr-1" /> : <Mail size={14} className="mr-1" />}
+                            Reenviar e-mail
+                          </Button>
+                          <Button variant="outline" onClick={compartilhar} className="min-h-11 rounded-xl text-xs font-semibold">
+                            <Share2 size={14} className="mr-1" />
+                            Compartilhar
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className={"inline-flex items-center gap-1 mt-1.5 text-[11px] font-semibold " + (c.situacao === "aceito" ? "text-[#16A36A]" : "text-[#C2414B]")}>
+                        {c.situacao === "aceito" ? <CheckCircle2 size={12} /> : <Ban size={12} />}
+                        {c.situacao === "aceito" ? "Aceito · conta ativa" : "Aceito · conta suspensa"}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {loadingUsers ? (
             <div className="flex items-center justify-center py-6">
               <Loader2 size={20} className="animate-spin text-gray-400" />
             </div>
-          ) : users.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-6">Nenhum usuário registrado.</p>
+          ) : usuariosAtivos.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-6">Nenhum usuário ativo.</p>
           ) : (
             <ul className="space-y-2">
-              {users.map((u) => {
-                const ownerSelf = isOwnerEmail(u.email);
-                const ativo = ownerSelf || u.acesso_ativo === true;
-                const suspenso = !ativo && !!u.data_suspensao;
-                return (
-                  <li key={u.id} className="bg-white rounded-2xl border border-gray-100 p-3">
-                    <div className="flex items-start justify-between gap-3 min-w-0">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-[#1F2937] break-words">
-                          {u.full_name || "Sem nome"}
-                          {ownerSelf && <span className="ml-1.5 text-[10px] font-semibold text-[#0F6B4F]">(você)</span>}
-                        </p>
-                        <p className="text-xs text-gray-500 break-words">{u.email || "—"}</p>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          {ativo ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#16A36A]">
-                              <CheckCircle2 size={12} /> Ativo
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#C2414B]">
-                              <Ban size={12} /> Suspenso · {formatDate(u.data_suspensao)}
-                            </span>
-                          )}
-                        </div>
-                        {suspenso && u.motivo_suspensao && (
-                          <p className="text-[11px] text-gray-500 mt-1 break-words">Motivo: {u.motivo_suspensao}</p>
-                        )}
-                      </div>
-                      <div className="shrink-0">
-                        {ownerSelf ? (
-                          <span className="text-[11px] text-gray-300 font-medium">Protegido</span>
-                        ) : ativo ? (
-                          <Button
-                            variant="outline"
-                            onClick={() => openSuspend(u)}
-                            className="h-10 min-h-[40px] rounded-xl text-xs font-semibold text-[#C2414B] border-[#C2414B]/30 hover:bg-[#C2414B]/5"
-                          >
-                            <Ban size={14} className="mr-1" />
-                            Suspender
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            onClick={() => handleReactivate(u)}
-                            disabled={actionUser === u.id}
-                            className="h-10 min-h-[40px] rounded-xl text-xs font-semibold text-[#0F6B4F] border-[#0F6B4F]/30 hover:bg-[#0F6B4F]/5"
-                          >
-                            {actionUser === u.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} className="mr-1" />}
-                            Reativar
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
+              {usuariosAtivos.map(renderUsuario)}
             </ul>
+          )}
+
+          {usuariosSuspensos.length > 0 && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setVerSuspensos((v) => !v)}
+                aria-expanded={verSuspensos}
+                className="w-full min-h-11 flex items-center justify-between rounded-xl px-3 text-sm font-medium text-gray-600 bg-white border border-gray-100"
+              >
+                <span>Suspensos ({usuariosSuspensos.length})</span>
+                <ChevronDown size={18} className={"transition-transform " + (verSuspensos ? "rotate-180" : "")} />
+              </button>
+              {verSuspensos && (
+                <ul className="space-y-2 mt-2">
+                  {usuariosSuspensos.map(renderUsuario)}
+                </ul>
+              )}
+            </div>
           )}
         </section>
       )}
