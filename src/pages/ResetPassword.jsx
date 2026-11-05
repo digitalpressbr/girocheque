@@ -81,7 +81,7 @@ export default function ResetPassword() {
         }
       >
         <p className="text-sm text-foreground text-center">
-          Abra esta tela pelo link do e-mail "Reset your password". O link vale por 1 hora.
+          Peça um código novo em "Esqueci a senha". O código vale por 1 hora.
         </p>
       </AuthLayout>
     );

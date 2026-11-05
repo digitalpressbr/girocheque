@@ -28,10 +28,11 @@ function erroDe(error, status) {
 export function traduzirErro(msg) {
   const m = String(msg || '');
   if (/Invalid login credentials/i.test(m)) return 'E-mail ou senha incorretos.';
-  if (/Email not confirmed/i.test(m)) return 'Confirme o cadastro tocando no link do e-mail "Confirm your signup" antes de entrar.';
+  if (/Email not confirmed/i.test(m)) return 'Falta confirmar o e-mail. Toque em "Primeiro acesso", use o mesmo e-mail e digite o código que chegar.';
   if (/User already registered/i.test(m)) return 'Este e-mail já tem cadastro. Use "Entrar" ou "Esqueci a senha".';
   if (/Password should be at least/i.test(m)) return 'A senha precisa ter pelo menos 8 caracteres.';
   if (/Token has expired or is invalid/i.test(m)) return 'Código inválido ou vencido. Peça um novo código.';
+  if (/For security purposes/i.test(m)) return 'Aguarde 1 minuto para pedir outro código.';
   if (/rate limit|too many/i.test(m)) return 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.';
   if (/Unable to validate email address/i.test(m)) return 'E-mail inválido.';
   if (/New password should be different/i.test(m)) return 'A nova senha precisa ser diferente da atual.';
@@ -163,8 +164,8 @@ const auth = {
     if (error) throw erroDe(error);
     return data;
   },
-  // Convidado cria a conta já confirmada (o e-mail padrão do Supabase não chega a quem é de fora
-  // da organização). A função só aceita e-mail que está em public.convites; depois entra direto.
+  // Convidado cria a conta (só e-mail que está em public.convites) e recebe um código de 6
+  // dígitos no e-mail, mandado pelo Gmail da Digital Press. Entra depois de digitar o código.
   async register({ email, password, fullName }) {
     const limpo = email.trim().toLowerCase();
     const { error } = await supabase.functions.invoke('cadastrar-convidado', {
@@ -178,22 +179,18 @@ const auth = {
       } catch { /* resposta sem corpo */ }
       throw erroDe({ message: msg }, error.context?.status);
     }
-    const { data, error: erroLogin } = await supabase.auth.signInWithPassword({ email: limpo, password });
-    if (erroLogin) throw erroDe(erroLogin);
-    return data;
+    const { error: erroCodigo } = await supabase.auth.resend({ type: 'signup', email: limpo });
+    if (erroCodigo) throw erroDe(erroCodigo);
+    return { precisaCodigo: true };
   },
   async verifyOtp({ email, otpCode }) {
-    const { data, error } = await supabase.auth.verifyOtp({ email: email.trim().toLowerCase(), token: otpCode, type: 'signup' });
+    const { data, error } = await supabase.auth.verifyOtp({ email: email.trim().toLowerCase(), token: String(otpCode).trim(), type: 'signup' });
     if (error) throw erroDe(error);
     return { access_token: data?.session?.access_token };
   },
   setToken() {},
   async resendOtp(email) {
-    const { error } = await supabase.auth.resend({
-      type: 'signup',
-      email: email.trim().toLowerCase(),
-      options: { emailRedirectTo: `${window.location.origin}${BASE}` },
-    });
+    const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim().toLowerCase() });
     if (error) throw erroDe(error);
   },
   async resetPasswordRequest(email) {
@@ -202,7 +199,12 @@ const auth = {
     });
     if (error) throw erroDe(error);
   },
-  // Chamado com a sessão aberta pelo link do e-mail de nova senha
+  // Código de 6 dígitos do e-mail de troca de senha: abre a sessão de recuperação
+  async verifyRecovery({ email, code }) {
+    const { error } = await supabase.auth.verifyOtp({ email: email.trim().toLowerCase(), token: code.trim(), type: 'recovery' });
+    if (error) throw erroDe(error);
+  },
+  // Chamado com a sessão de recuperação aberta (código ou link antigo)
   async resetPassword({ newPassword }) {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw erroDe(error);

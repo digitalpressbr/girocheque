@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
+import CodigoEmail from "@/components/CodigoEmail";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ export default function Register() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [nome, setNome] = useState("");
+  const [etapaCodigo, setEtapaCodigo] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -29,13 +31,28 @@ export default function Register() {
     setLoading(true);
     try {
       await base44.auth.register({ email, password, fullName: nome.trim() });
-      window.location.replace(`${import.meta.env.BASE_URL}`);
+      setEtapaCodigo(true);
     } catch (err) {
       setError(err.message || "Não foi possível criar o cadastro.");
     } finally {
       setLoading(false);
     }
   };
+
+  if (etapaCodigo) {
+    return (
+      <CodigoEmail
+        email={email}
+        titulo="Confirme o seu e-mail"
+        onConfirmar={async (codigo) => {
+          await base44.auth.verifyOtp({ email, otpCode: codigo });
+          window.location.replace(`${import.meta.env.BASE_URL}`);
+        }}
+        onReenviar={() => base44.auth.resendOtp(email)}
+        onVoltar={() => setEtapaCodigo(false)}
+      />
+    );
+  }
 
   return (
     <AuthLayout
@@ -127,7 +144,7 @@ export default function Register() {
           {loading ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Criando a conta...
+              Enviando o código...
             </>
           ) : (
             "Criar senha"
