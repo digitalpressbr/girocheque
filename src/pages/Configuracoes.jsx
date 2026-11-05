@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import InstallAppCard from "@/components/InstallAppCard";
+import { AvisosConfig } from "@/components/AvisosVencimento";
 import ActiveUsersSummary from "@/components/ActiveUsersSummary";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
@@ -229,6 +230,7 @@ export default function Configuracoes() {
 
       {/* Instalação do app */}
       <InstallAppCard />
+      <AvisosConfig />
 
       {/* 2) Responsáveis */}
       <section className="mb-6" aria-labelledby="sec-resp">

@@ -3,9 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { formatBRL, formatPercent } from "@/lib/formatCurrency";
 import { calculateCashPosition } from "@/lib/financialLedger";
-import { Settings, TrendingUp, Banknote, FileText, ArrowDownUp } from "lucide-react";
+import { Settings, TrendingUp, Banknote, FileText, ArrowDownUp, HandCoins } from "lucide-react";
 import WelcomeSetup from "@/components/WelcomeSetup";
 import AporteModal from "@/components/AporteModal";
+import RetiradaDialog from "@/components/RetiradaDialog";
+import InstallAppButton from "@/components/InstallAppButton";
+import { PedidoDeAvisos } from "@/components/AvisosVencimento";
 import UpcomingPayments from "@/components/UpcomingPayments";
 import ConfigEditor from "@/components/ConfigEditor";
 import MonthlyGains from "@/components/MonthlyGains";
@@ -17,6 +20,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
   const [showAporte, setShowAporte] = useState(false);
+  const [showRetirada, setShowRetirada] = useState(false);
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [renovacoes, setRenovacoes] = useState([]);
 
@@ -95,13 +99,16 @@ export default function Home() {
             Capital: {formatBRL(capitalInicial)} · Desde {formatDate(config.data_inicio)}
           </p>
         </div>
-        <button
-          onClick={() => navigate("/configuracoes")}
-          aria-label="Configurações"
-          className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-500 hover:text-emerald-700 transition-colors"
-        >
-          <Settings size={18} />
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <InstallAppButton />
+          <button
+            onClick={() => navigate("/configuracoes")}
+            aria-label="Configurações"
+            className="w-11 h-11 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-500 hover:text-emerald-700 transition-colors"
+          >
+            <Settings size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Saldo Total */}
@@ -140,15 +147,24 @@ export default function Home() {
           <p className="text-base font-bold text-gray-900 mt-0.5 whitespace-nowrap">{formatBRL(emCheques)}</p>
         </div>
       </div>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-end mb-1">
+        <span className="text-xs text-gray-400">Taxa média {taxaMediaStr}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 mb-4">
         <button
           onClick={() => setShowAporte(true)}
-          className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+          className="min-h-11 rounded-xl bg-white shadow-sm flex items-center justify-center gap-1.5 text-sm font-semibold text-blue-600 hover:bg-blue-50 transition-colors"
         >
-          <ArrowDownUp size={14} />
+          <ArrowDownUp size={16} />
           Aporte particular
         </button>
-        <span className="text-xs text-gray-400">Taxa média {taxaMediaStr}</span>
+        <button
+          onClick={() => setShowRetirada(true)}
+          className="min-h-11 rounded-xl bg-white shadow-sm flex items-center justify-center gap-1.5 text-sm font-semibold text-[#C2414B] hover:bg-red-50 transition-colors"
+        >
+          <HandCoins size={16} />
+          Retirada
+        </button>
       </div>
 
       {/* Próximos vencimentos */}
@@ -171,6 +187,15 @@ export default function Home() {
         open={showAporte}
         onClose={() => setShowAporte(false)}
         onChanged={reloadMovimentacoes}
+      />
+
+      <PedidoDeAvisos />
+
+      <RetiradaDialog
+        open={showRetirada}
+        onOpenChange={(o) => setShowRetirada(o)}
+        retirada={null}
+        onSaved={reloadMovimentacoes}
       />
     </div>
   );

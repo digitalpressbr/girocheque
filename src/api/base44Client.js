@@ -2,6 +2,7 @@
 // integrations, functions, users), agora em cima do Supabase. Assim as telas não mudam.
 import { supabase } from '@/api/supabaseClient';
 import { DETECTAR_CHEQUE_PROMPT, DETECTAR_CHEQUE_SCHEMA } from '@/api/detectarChequePrompt';
+import { comprimirImagem } from '@/lib/compressImage';
 
 const TABELAS = {
   ConfigCaixa: 'config_caixa',
@@ -115,6 +116,7 @@ function nomeSeguro(nome) {
 async function enviarArquivo(bucket, file, prefixo = '') {
   const u = await usuarioDaSessao();
   if (!u) throw erroDe({ message: 'Faça login novamente.' }, 401);
+  file = await comprimirImagem(file);
   const aleatorio = Math.random().toString(36).slice(2, 11);
   const caminho = `${u.email.toLowerCase()}/${prefixo}${aleatorio}_${nomeSeguro(file?.name)}`;
   const { error } = await supabase.storage.from(bucket).upload(caminho, file, {
@@ -161,16 +163,23 @@ const auth = {
     if (error) throw erroDe(error);
     return data;
   },
-  async register({ email, password }) {
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
-      password,
-      options: { emailRedirectTo: `${window.location.origin}${BASE}` },
+  // Convidado cria a conta já confirmada (o e-mail padrão do Supabase não chega a quem é de fora
+  // da organização). A função só aceita e-mail que está em public.convites; depois entra direto.
+  async register({ email, password, fullName }) {
+    const limpo = email.trim().toLowerCase();
+    const { error } = await supabase.functions.invoke('cadastrar-convidado', {
+      body: { email: limpo, password, full_name: fullName || '' },
     });
-    if (error) throw erroDe(error);
-    if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-      throw erroDe({ message: 'User already registered' });
+    if (error) {
+      let msg = 'Não foi possível criar a conta.';
+      try {
+        const corpo = await error.context?.json?.();
+        if (corpo?.error) msg = corpo.error;
+      } catch { /* resposta sem corpo */ }
+      throw erroDe({ message: msg }, error.context?.status);
     }
+    const { data, error: erroLogin } = await supabase.auth.signInWithPassword({ email: limpo, password });
+    if (erroLogin) throw erroDe(erroLogin);
     return data;
   },
   async verifyOtp({ email, otpCode }) {

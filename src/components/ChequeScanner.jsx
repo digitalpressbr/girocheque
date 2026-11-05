@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Camera, Paperclip } from "lucide-react";
+import { Camera, Image as ImageIcon } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import ChequePreviewDialog from "@/components/ChequePreviewDialog";
 
@@ -29,27 +29,27 @@ export default function ChequeScanner({ file, onFileSelected }) {
       <div>
         <Label className="text-sm font-medium text-gray-700">Foto do cheque</Label>
         <div className="mt-1.5 grid grid-cols-2 gap-2">
-          <label className="flex items-center justify-center gap-1.5 h-12 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-emerald-300 transition-colors">
+          <label className="flex items-center justify-center gap-1.5 h-12 min-w-0 px-2 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-emerald-300 transition-colors">
             <Camera size={16} className="text-gray-400" />
-            <span className="text-xs text-gray-500">Tirar foto</span>
+            <span className="text-sm text-gray-600">Tirar foto</span>
             <input
               type="file"
               accept="image/*"
               capture="environment"
               className="hidden"
-              onChange={(e) => handleFile(e.target.files[0] || null)}
+              onChange={(e) => { handleFile(e.target.files[0] || null); e.target.value = ""; }}
             />
           </label>
-          <label className="flex items-center justify-center gap-1.5 h-12 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-emerald-300 transition-colors">
-            <Paperclip size={16} className="text-gray-400" />
-            <span className="text-xs text-gray-500">
-              {file ? file.name.slice(0, 14) : "Anexar arquivo"}
+          <label className="flex items-center justify-center gap-1.5 h-12 min-w-0 px-2 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-emerald-300 transition-colors">
+            <ImageIcon size={16} className="text-gray-400" />
+            <span className="text-sm text-gray-600 truncate max-w-[9rem]">
+              {file ? "Trocar foto" : "Galeria ou PDF"}
             </span>
             <input
               type="file"
               accept="image/*,application/pdf"
               className="hidden"
-              onChange={(e) => handleFile(e.target.files[0] || null)}
+              onChange={(e) => { handleFile(e.target.files[0] || null); e.target.value = ""; }}
             />
           </label>
         </div>

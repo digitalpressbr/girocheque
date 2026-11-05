@@ -4,9 +4,8 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Mail, Lock, Loader2 } from "lucide-react";
+import { UserPlus, Mail, Lock, Loader2, User } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
-import { toast } from "@/components/ui/use-toast";
 
 export default function Register() {
   const [email, setEmail] = useState("");
@@ -14,7 +13,7 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [enviado, setEnviado] = useState(false);
+  const [nome, setNome] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -29,8 +28,8 @@ export default function Register() {
     }
     setLoading(true);
     try {
-      await base44.auth.register({ email, password });
-      setEnviado(true);
+      await base44.auth.register({ email, password, fullName: nome.trim() });
+      window.location.replace(`${import.meta.env.BASE_URL}`);
     } catch (err) {
       setError(err.message || "Não foi possível criar o cadastro.");
     } finally {
@@ -38,51 +37,11 @@ export default function Register() {
     }
   };
 
-  const handleResend = async () => {
-    setError("");
-    try {
-      await base44.auth.resendOtp(email);
-      toast({ title: "E-mail reenviado", description: "Confira a caixa de entrada e o lixo eletrônico." });
-    } catch (err) {
-      setError(err.message || "Não foi possível reenviar o e-mail.");
-    }
-  };
-
-  if (enviado) {
-    return (
-      <AuthLayout
-        icon={Mail}
-        title="Confirme seu e-mail"
-        subtitle={`Enviamos um e-mail para ${email}`}
-        footer={
-          <Link to="/login" className="text-primary font-medium hover:underline">
-            Voltar para entrar
-          </Link>
-        }
-      >
-        {error && (
-          <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-            {error}
-          </div>
-        )}
-        <div className="space-y-3 text-sm text-foreground">
-          <p>1. Abra o e-mail com o assunto <strong>"Confirm your signup"</strong> (vem em inglês, do Supabase).</p>
-          <p>2. Toque no link <strong>"Confirm your mail"</strong>.</p>
-          <p>3. O GiroCheque abre com a sua conta ativa.</p>
-          <p className="text-muted-foreground">Não achou? Olhe o lixo eletrônico.</p>
-        </div>
-        <Button variant="outline" className="w-full h-12 font-medium mt-6" onClick={handleResend}>
-          Reenviar e-mail
-        </Button>
-      </AuthLayout>
-    );
-  }
-
   return (
     <AuthLayout
       icon={UserPlus}
       title="Primeiro acesso"
-      subtitle="Use o e-mail liberado pelo administrador e crie sua senha"
+      subtitle="Use o e-mail que foi convidado e crie a sua senha"
       footer={
         <>
           Já tem senha?{" "}
@@ -100,6 +59,22 @@ export default function Register() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
+          <Label htmlFor="nome">Seu nome</Label>
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+            <Input
+              id="nome"
+              type="text"
+              autoComplete="name"
+              autoCapitalize="words"
+              placeholder="Como quer ser chamado"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              className="pl-10 h-12"
+            />
+          </div>
+        </div>
+        <div className="space-y-2">
           <Label htmlFor="email">E-mail</Label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
@@ -108,7 +83,6 @@ export default function Register() {
               type="email"
               inputMode="email"
               autoComplete="email"
-              autoFocus
               placeholder="seu@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -153,7 +127,7 @@ export default function Register() {
           {loading ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Enviando...
+              Criando a conta...
             </>
           ) : (
             "Criar senha"

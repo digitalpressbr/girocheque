@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,9 @@ import { currencyMask } from "@/lib/masks";
 import { parseBRLInput } from "@/lib/formatCurrency";
 import { localDateKey } from "@/lib/financialLedger";
 import { useToast } from "@/components/ui/use-toast";
-
-const RESPONSAVEIS = ["Rodrigo", "Isabela"];
+import { useResponsaveis } from "@/hooks/useResponsaveis";
+import { normalizeResponsavelName } from "@/lib/responsaveis";
+import { Plus, Check, X as XIcon } from "lucide-react";
 
 function valorToMaskedStr(v) {
   const cents = Math.round(Number(v || 0) * 100);
@@ -23,7 +24,11 @@ function isDateKey(d) {
 
 export default function RetiradaDialog({ open, onOpenChange, retirada, onSaved }) {
   const { toast } = useToast();
+  const { ativos, add: addResponsavel } = useResponsaveis();
   const [responsavel, setResponsavel] = useState("");
+  const [novoAberto, setNovoAberto] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [salvandoNome, setSalvandoNome] = useState(false);
   const [descricao, setDescricao] = useState("");
   const [valorStr, setValorStr] = useState("");
   const [data, setData] = useState("");
@@ -31,6 +36,8 @@ export default function RetiradaDialog({ open, onOpenChange, retirada, onSaved }
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    setNovoAberto(false);
+    setNovoNome("");
     if (!open) {
       setResponsavel("");
       setDescricao("");
@@ -55,9 +62,47 @@ export default function RetiradaDialog({ open, onOpenChange, retirada, onSaved }
 
   const valorNum = parseBRLInput(valorStr);
 
+  // Nomes ativos da conta + o nome já gravado na retirada que está sendo editada
+  const opcoes = useMemo(() => {
+    const nomes = ativos.map((r) => r.nome).filter(Boolean);
+    if (retirada?.responsavel && !nomes.some((n) => n.toLowerCase() === retirada.responsavel.toLowerCase())) {
+      nomes.push(retirada.responsavel);
+    }
+    if (responsavel && !nomes.some((n) => n.toLowerCase() === responsavel.toLowerCase())) {
+      nomes.push(responsavel);
+    }
+    return nomes;
+  }, [ativos, retirada, responsavel]);
+
+  // Só um nome cadastrado: já vem marcado
+  useEffect(() => {
+    if (open && !retirada && !responsavel && opcoes.length === 1) setResponsavel(opcoes[0]);
+  }, [open, retirada, responsavel, opcoes]);
+
+  const confirmarNovoNome = async () => {
+    const nome = normalizeResponsavelName(novoNome);
+    if (!nome || salvandoNome) return;
+    const existente = opcoes.find((n) => n.toLowerCase() === nome.toLowerCase());
+    if (existente) {
+      setResponsavel(existente);
+    } else {
+      setSalvandoNome(true);
+      const criado = await addResponsavel(nome);
+      setSalvandoNome(false);
+      if (!criado) {
+        toast({ title: "Não foi possível salvar o nome", description: "Tente de novo.", variant: "destructive" });
+        return;
+      }
+      setResponsavel(criado.nome || nome);
+    }
+    setNovoAberto(false);
+    setNovoNome("");
+    setErrors((e) => ({ ...e, responsavel: undefined }));
+  };
+
   const validate = () => {
     const errs = {};
-    if (!RESPONSAVEIS.includes(responsavel)) errs.responsavel = "Escolha Rodrigo ou Isabela.";
+    if (!responsavel.trim()) errs.responsavel = "Escolha quem fez a retirada.";
     if (!descricao.trim()) errs.descricao = "Informe uma descrição.";
     if (!Number.isFinite(valorNum) || valorNum <= 0) errs.valor = "Informe um valor maior que zero.";
     if (!isDateKey(data)) errs.data = "Informe uma data válida.";
@@ -109,21 +154,21 @@ export default function RetiradaDialog({ open, onOpenChange, retirada, onSaved }
 
         <div className="flex-1 overflow-y-auto px-5 pb-3 space-y-4">
           <div>
-            <Label htmlFor="retirada-responsavel" className="text-sm font-medium text-gray-700">Responsável</Label>
+            <Label htmlFor="retirada-responsavel" className="text-sm font-medium text-gray-700">Retirada feita por</Label>
             <div
               id="retirada-responsavel"
               role="radiogroup"
-              aria-label="Responsável"
+              aria-label="Retirada feita por"
               className="mt-1.5 grid grid-cols-2 gap-2"
             >
-              {RESPONSAVEIS.map((r) => (
+              {opcoes.map((r) => (
                 <button
                   key={r}
                   type="button"
                   role="radio"
                   aria-checked={responsavel === r}
                   onClick={() => setResponsavel(r)}
-                  className={`min-h-11 min-w-11 rounded-xl text-sm font-semibold transition-colors border ${
+                  className={`min-h-11 min-w-11 px-2 rounded-xl text-sm font-semibold transition-colors border truncate ${
                     responsavel === r
                       ? "bg-emerald-700 text-white border-emerald-700"
                       : "bg-white text-gray-600 border-gray-200"
@@ -132,7 +177,49 @@ export default function RetiradaDialog({ open, onOpenChange, retirada, onSaved }
                   {r}
                 </button>
               ))}
+              {!novoAberto && (
+                <button
+                  type="button"
+                  onClick={() => setNovoAberto(true)}
+                  className="min-h-11 min-w-11 rounded-xl text-sm font-semibold border border-dashed border-emerald-300 text-emerald-700 bg-emerald-50/50 flex items-center justify-center gap-1"
+                >
+                  <Plus size={16} />
+                  Outra pessoa
+                </button>
+              )}
             </div>
+            {novoAberto && (
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  autoFocus
+                  value={novoNome}
+                  onChange={(e) => setNovoNome(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmarNovoNome(); } }}
+                  placeholder="Nome de quem retirou"
+                  autoCapitalize="words"
+                  enterKeyHint="done"
+                  className="h-11 text-base flex-1 min-w-0"
+                  aria-label="Nome de quem retirou"
+                />
+                <button
+                  type="button"
+                  onClick={confirmarNovoNome}
+                  disabled={!novoNome.trim() || salvandoNome}
+                  aria-label="Adicionar nome"
+                  className="w-11 h-11 shrink-0 rounded-xl bg-emerald-700 text-white flex items-center justify-center disabled:opacity-50"
+                >
+                  <Check size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setNovoAberto(false); setNovoNome(""); }}
+                  aria-label="Cancelar novo nome"
+                  className="w-11 h-11 shrink-0 rounded-xl border border-gray-200 text-gray-500 flex items-center justify-center"
+                >
+                  <XIcon size={18} />
+                </button>
+              </div>
+            )}
             {errors.responsavel && <p className="text-xs text-red-600 mt-1.5">{errors.responsavel}</p>}
           </div>
 

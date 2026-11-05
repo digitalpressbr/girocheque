@@ -4,12 +4,15 @@ export default function useInstallApp() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [platform, setPlatform] = useState("desktop");
+  const [iosOutroNavegador, setIosOutroNavegador] = useState(false);
 
   useEffect(() => {
     const ua = navigator.userAgent || "";
-    const isIOS = /iphone|ipad|ipod/i.test(ua);
+    // iPad recente se apresenta como Mac; o toque denuncia
+    const isIOS = /iphone|ipad|ipod/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
     const isAndroid = /android/i.test(ua);
     setPlatform(isIOS ? "ios" : isAndroid ? "android" : "desktop");
+    setIosOutroNavegador(isIOS && /crios|fxios|edgios|opios|gsa\//i.test(ua));
 
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
@@ -49,5 +52,5 @@ export default function useInstallApp() {
     }
   };
 
-  return { canPrompt, install, isInstalled, platform };
+  return { canPrompt, install, isInstalled, platform, iosOutroNavegador };
 }

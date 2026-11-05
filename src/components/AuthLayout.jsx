@@ -1,8 +1,12 @@
 import React from "react";
+import InstallAppButton from "@/components/InstallAppButton";
 
 export default function AuthLayout({ icon: Icon, title, subtitle, footer, children }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-background px-4 py-16">
+      <div className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))]">
+        <InstallAppButton />
+      </div>
       <div className="w-full max-w-md">
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-primary mb-4">
