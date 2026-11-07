@@ -116,6 +116,9 @@ export default function EditChequeDialog({ cheque, open, onClose, onSaved, onPre
       foto_uri: fotoUri,
       foto_uri_2: fotoUri2,
     };
+    // Foto trocada ou excluída: o link antigo do Base44 (foto_url) também sai, senão ela volta na lista.
+    if (ps.slot1.removed || ps.slot1.file) updateData.foto_url = "";
+    if (ps.slot2.removed || ps.slot2.file) updateData.foto_url_2 = "";
     if (cheque.data_vencimento !== dataVencimento) {
       updateData.aviso_enviado = false;
     }
@@ -212,8 +215,8 @@ export default function EditChequeDialog({ cheque, open, onClose, onSaved, onPre
               <div className="mt-1.5">
                 <ChequePhotoEditor
                   key={cheque.id}
-                  fotoUrl1={cheque.foto_url}
-                  fotoUrl2={cheque.foto_url_2}
+                  fotoUrl1={cheque.foto_uri || cheque.foto_url || ""}
+                  fotoUrl2={cheque.foto_uri_2 || cheque.foto_url_2 || ""}
                   onChange={handlePhotoChange}
                   onPreview={onPreview}
                 />

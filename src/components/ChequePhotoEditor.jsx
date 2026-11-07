@@ -2,6 +2,23 @@ import { useState, useEffect, useCallback } from "react";
 import { FileText, RefreshCw, Trash2, Plus } from "lucide-react";
 import ChequePreviewDialog from "@/components/ChequePreviewDialog";
 import OrigemFoto from "@/components/OrigemFoto";
+import { base44 } from "@/api/base44Client";
+
+// As fotos ficam no armazenamento privado (foto_uri); para mostrar é preciso um link assinado.
+function useLinkDaFoto(valor) {
+  const [link, setLink] = useState("");
+  useEffect(() => {
+    let vivo = true;
+    if (!valor) { setLink(""); return undefined; }
+    if (/^(https?:|blob:)/.test(valor)) { setLink(valor); return undefined; }
+    setLink("");
+    base44.integrations.Core.CreateFileSignedUrl({ file_uri: valor, expires_in: 900 })
+      .then((r) => { if (vivo) setLink(r?.signed_url || ""); })
+      .catch(() => { if (vivo) setLink(""); });
+    return () => { vivo = false; };
+  }, [valor]);
+  return link;
+}
 
 export default function ChequePhotoEditor({ fotoUrl1, fotoUrl2, onChange, onPreview }) {
   const [slot1, setSlot1] = useState({ url: fotoUrl1 || "", file: null, previewUrl: null, removed: false });
@@ -58,11 +75,13 @@ export default function ChequePhotoEditor({ fotoUrl1, fotoUrl2, onChange, onPrev
   };
 
   const slot1Active = ((slot1.url || slot1.file) && !slot1.removed);
+  const link1 = useLinkDaFoto(slot1.removed ? "" : slot1.url);
+  const link2 = useLinkDaFoto(slot2.removed ? "" : slot2.url);
 
   const renderSlot = (slot, s) => {
     const active = (s.url || s.file) && !s.removed;
-    const previewSrc = s.previewUrl || s.url;
-    const isPdf = (s.file && s.file.type === "application/pdf") || (previewSrc && previewSrc.toLowerCase().split("?")[0].endsWith(".pdf"));
+    const previewSrc = s.previewUrl || (slot === 1 ? link1 : link2);
+    const isPdf = (s.file && s.file.type === "application/pdf") || (s.url && s.url.toLowerCase().split("?")[0].endsWith(".pdf"));
     const escolhendo = targetSlot === slot;
     if (!active) {
       if (slot === 2 && !slot1Active) return null;
@@ -95,8 +114,10 @@ export default function ChequePhotoEditor({ fotoUrl1, fotoUrl2, onChange, onPrev
             <div className="h-20 flex items-center justify-center gap-2 text-gray-500">
               <FileText size={20} /> <span className="text-sm">PDF</span>
             </div>
-          ) : (
+          ) : previewSrc ? (
             <img src={previewSrc} alt={slot === 1 ? "Foto do cheque" : "Verso do cheque"} className="w-full max-h-40 object-contain" />
+          ) : (
+            <div className="h-28 flex items-center justify-center text-xs text-gray-400">Carregando a foto...</div>
           )}
         </button>
         {escolhendo ? (

@@ -456,7 +456,7 @@ export default function Cheques() {
         onPreview={(url) => {
           const c = editCheque;
           if (!c) return;
-          const urls = [c.foto_url, c.foto_url_2].filter(Boolean);
+          const urls = [c.foto_url, c.foto_url_2].filter(Boolean).concat(getChequePrivateFileUris(c));
           setPhotoView({ urls, startIndex: Math.max(0, urls.indexOf(url)), cheque: c });
         }}
       />
