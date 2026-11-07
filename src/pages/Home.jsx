@@ -111,42 +111,55 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Saldo Total */}
-      <div className={`${saldoTotal < 0 ? "bg-red-600" : "bg-emerald-700"} rounded-2xl p-5 shadow-lg mb-4`}>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-emerald-200 text-sm font-medium">Saldo Total</span>
-          <span className="bg-emerald-600 text-emerald-100 text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1">
+      {/* Patrimônio do giro: total grande e, embaixo, de onde ele vem */}
+      <section
+        aria-labelledby="titulo-patrimonio"
+        className={`${saldoTotal < 0 ? "bg-red-600" : "bg-emerald-700"} rounded-2xl p-5 shadow-lg mb-1 text-white`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 id="titulo-patrimonio" className="text-emerald-100 text-sm font-semibold">Patrimônio do giro</h2>
+            <p className="text-emerald-200/90 text-[11px] leading-tight">O que você tem se todos os cheques forem pagos</p>
+          </div>
+          <span className="shrink-0 bg-white/15 text-white text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1">
             <TrendingUp size={12} />
             {crescimento >= 0 ? "+" : ""}{formatPercent(crescimento)}
           </span>
         </div>
-        <p className="text-white text-3xl font-bold tracking-tight">{formatBRL(saldoTotal)}</p>
-      </div>
+        <p className="text-3xl font-bold tracking-tight mt-2 tabular-nums">{formatBRL(saldoTotal)}</p>
 
-      {/* Cards lado a lado */}
-      <div className="grid grid-cols-2 gap-3 mb-1">
-        <div className="bg-white rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center">
-              <Banknote size={16} className="text-emerald-700" />
-            </div>
+        <dl className="mt-4 rounded-xl bg-black/15 px-3 py-2 text-sm divide-y divide-white/10">
+          <div className="flex items-center justify-between gap-3 py-2">
+            <dt className="flex items-center gap-2 text-emerald-50">
+              <Banknote size={16} className="shrink-0" /> Dinheiro em conta
+            </dt>
+            <dd className={`font-semibold tabular-nums whitespace-nowrap ${disponivel < 0 ? "text-red-200" : ""}`}>{formatBRL(disponivel)}</dd>
           </div>
-          <p className="text-sm text-gray-400 font-medium">Disponível</p>
-          <p className={`text-base font-bold mt-0.5 whitespace-nowrap ${disponivel < 0 ? "text-red-600" : "text-gray-900"}`}>{formatBRL(disponivel)}</p>
+          <div className="flex items-center justify-between gap-3 py-2">
+            <dt className="flex items-center gap-2 text-emerald-50">
+              <FileText size={16} className="shrink-0" /> Cheques a receber
+            </dt>
+            <dd className="font-semibold tabular-nums whitespace-nowrap">+ {formatBRL(emCheques)}</dd>
+          </div>
           {particularNoCaixa > 0 && (
-            <p className="text-xs text-blue-600 font-medium mt-0.5">Particular: {formatBRL(particularNoCaixa)}</p>
-          )}
-        </div>
-        <div className="bg-white rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
-              <FileText size={16} className="text-amber-600" />
+            <div className="flex items-center justify-between gap-3 py-2">
+              <dt className="flex items-center gap-2 text-emerald-50">
+                <ArrowDownUp size={16} className="shrink-0" /> Aporte particular
+              </dt>
+              <dd className="font-semibold tabular-nums whitespace-nowrap">− {formatBRL(particularNoCaixa)}</dd>
             </div>
+          )}
+          <div className="flex items-center justify-between gap-3 py-2">
+            <dt className="text-emerald-100">Capital inicial</dt>
+            <dd className="tabular-nums whitespace-nowrap text-emerald-100">{formatBRL(capitalInicial)}</dd>
           </div>
-          <p className="text-sm text-gray-400 font-medium">Em cheques</p>
-          <p className="text-base font-bold text-gray-900 mt-0.5 whitespace-nowrap">{formatBRL(emCheques)}</p>
-        </div>
-      </div>
+          <div className="flex items-center justify-between gap-3 py-2">
+            <dt className="text-emerald-100">Ganho até hoje</dt>
+            <dd className="font-semibold tabular-nums whitespace-nowrap">{saldoTotal - capitalInicial >= 0 ? "+ " : "− "}{formatBRL(Math.abs(saldoTotal - capitalInicial))}</dd>
+          </div>
+        </dl>
+      </section>
+
       <div className="flex items-center justify-end mb-1">
         <span className="text-xs text-gray-400">Taxa média {taxaMediaStr}</span>
       </div>

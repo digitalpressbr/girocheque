@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { RotateCw, Crop, X, Undo2, Loader2 } from "lucide-react";
-import { base44 } from "@/api/base44Client";
-import { autoDetectAndCrop, verifyCropComplete } from "@/lib/chequeScanner";
+import { RotateCw, X, Loader2, Sparkles, Check, Maximize2 } from "lucide-react";
+import { detectarPapel, melhorarImagem, LADO_MAX } from "@/lib/detectarPapel";
 
-async function fileToImage(file) {
+// Tela da foto do cheque: o recorte automático aparece na hora como uma moldura sobre a foto.
+// A pessoa arrasta os cantos se precisar, gira, liga ou desliga "Melhorar" e toca em "Usar foto".
+// Tudo roda no celular, sem internet. O resultado sai deitado (paisagem) e em JPEG.
+
+async function carregarImagem(file) {
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();
@@ -13,400 +16,224 @@ async function fileToImage(file) {
       img.onerror = reject;
       img.src = url;
     });
-    if (typeof img.decode === "function") {
-      try { await img.decode(); } catch {}
-    }
     return img;
   } finally {
     URL.revokeObjectURL(url);
   }
 }
 
-function rotateCanvas(img, deg) {
-  const canvas = document.createElement("canvas");
-  if (deg % 180 === 0) {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-  } else {
-    canvas.width = img.naturalHeight;
-    canvas.height = img.naturalWidth;
-  }
-  const ctx = canvas.getContext("2d");
-  ctx.translate(canvas.width / 2, canvas.height / 2);
-  ctx.rotate((deg * Math.PI) / 180);
-  ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-  return canvas;
-}
-
-function canvasToFile(canvas, name) {
+function canvasParaArquivo(canvas, nome) {
   return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      resolve(new File([blob], name, { type: "image/jpeg" }));
-    }, "image/jpeg", 0.85);
+    canvas.toBlob((blob) => resolve(new File([blob], nome, { type: "image/jpeg" })), "image/jpeg", 0.88);
   });
 }
 
-const MIN_CROP = 0.05;
+function girar90(img) {
+  const c = document.createElement("canvas");
+  c.width = img.naturalHeight || img.height;
+  c.height = img.naturalWidth || img.width;
+  const ctx = c.getContext("2d");
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(img, -(img.naturalWidth || img.width) / 2, -(img.naturalHeight || img.height) / 2);
+  return c;
+}
 
-const HANDLES = [
-  { id: "tl", edges: { left: true, top: true }, cursor: "nwse-resize", pos: { left: "0%", top: "0%" } },
-  { id: "tr", edges: { right: true, top: true }, cursor: "nesw-resize", pos: { left: "100%", top: "0%" } },
-  { id: "bl", edges: { left: true, bottom: true }, cursor: "nesw-resize", pos: { left: "0%", top: "100%" } },
-  { id: "br", edges: { right: true, bottom: true }, cursor: "nwse-resize", pos: { left: "100%", top: "100%" } },
-  { id: "t", edges: { top: true }, cursor: "ns-resize", pos: { left: "50%", top: "0%" } },
-  { id: "b", edges: { bottom: true }, cursor: "ns-resize", pos: { left: "50%", top: "100%" } },
-  { id: "l", edges: { left: true }, cursor: "ew-resize", pos: { left: "0%", top: "50%" } },
-  { id: "r", edges: { right: true }, cursor: "ew-resize", pos: { left: "100%", top: "50%" } },
+function detectarNaImagem(img) {
+  const escala = Math.min(1, LADO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(img.naturalWidth * escala));
+  c.height = Math.max(1, Math.round(img.naturalHeight * escala));
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  return detectarPapel(ctx.getImageData(0, 0, c.width, c.height));
+}
+
+const CAIXA_INTEIRA = { x: 0, y: 0, w: 1, h: 1 };
+const MIN_CROP = 0.08;
+const CANTOS = [
+  { id: "tl", left: true, top: true, pos: { left: "0%", top: "0%" } },
+  { id: "tr", right: true, top: true, pos: { left: "100%", top: "0%" } },
+  { id: "bl", left: true, bottom: true, pos: { left: "0%", top: "100%" } },
+  { id: "br", right: true, bottom: true, pos: { left: "100%", top: "100%" } },
 ];
 
 export default function ChequePreviewDialog({ open, file, onChoose, onClose }) {
-  const [displayUrl, setDisplayUrl] = useState("");
-  const [cropping, setCropping] = useState(false);
-  const [crop, setCrop] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [iaStatus, setIaStatus] = useState("");
-  const [canRevert, setCanRevert] = useState(false);
-  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [url, setUrl] = useState("");
+  const [crop, setCrop] = useState(CAIXA_INTEIRA);
+  const [achou, setAchou] = useState(null);
+  const [melhorar, setMelhorar] = useState(true);
+  const [ocupado, setOcupado] = useState(false);
+  const fonteRef = useRef(null);
+  const urlRef = useRef("");
+  const caixaRef = useRef(null);
+  const arrastoRef = useRef(null);
 
-  const containerRef = useRef(null);
-  const objectUrlRef = useRef("");
-  const originalFileRef = useRef(null);
-  const currentFileRef = useRef(null);
-  const preCropFileRef = useRef(null);
-  const suggestedBoxRef = useRef(null);
-  const dragRef = useRef(null);
-  const iaGuard = useRef(false);
-
-  async function preloadAndSwap(newFile) {
-    const newUrl = URL.createObjectURL(newFile);
-    try {
-      const tmp = new Image();
-      await new Promise((resolve, reject) => {
-        tmp.onload = resolve;
-        tmp.onerror = reject;
-        tmp.src = newUrl;
-      });
-      if (typeof tmp.decode === "function") {
-        try { await tmp.decode(); } catch {}
-      }
-    } catch {}
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    objectUrlRef.current = newUrl;
-    setDisplayUrl(newUrl);
-  }
+  const mostrar = async (arquivoOuCanvas) => {
+    const blob = arquivoOuCanvas instanceof Blob
+      ? arquivoOuCanvas
+      : await new Promise((r) => arquivoOuCanvas.toBlob(r, "image/jpeg", 0.92));
+    const novo = URL.createObjectURL(blob);
+    const img = await carregarImagem(blob);
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = novo;
+    fonteRef.current = img;
+    setUrl(novo);
+    let caixa = null;
+    try { caixa = detectarNaImagem(img); } catch { caixa = null; }
+    setAchou(!caixa ? "nao" : caixa.w > 0.95 && caixa.h > 0.95 ? "inteiro" : "sim");
+    setCrop(caixa || CAIXA_INTEIRA);
+  };
 
   useEffect(() => {
-    if (!open || !file) return;
-
-    originalFileRef.current = file;
-    currentFileRef.current = file;
-    preCropFileRef.current = null;
-    suggestedBoxRef.current = null;
-    setCropping(false);
-    setCrop(null);
-    setBusy(false);
-    setCanRevert(false);
-    setShowDiscardConfirm(false);
-    setIaStatus("detectando");
-
-    const url = URL.createObjectURL(file);
-    objectUrlRef.current = url;
-    setDisplayUrl(url);
-
-    const guardId = Date.now();
-    iaGuard.current = guardId;
-
-    (async () => {
-      try {
-        const { file: croppedFile, box, method, telemetry } = await autoDetectAndCrop(file);
-        if (iaGuard.current !== guardId) return;
-
-        if (croppedFile && box) {
-          suggestedBoxRef.current = box;
-
-          setIaStatus("conferindo");
-          const isComplete = await verifyCropComplete(croppedFile);
-          if (iaGuard.current !== guardId) return;
-
-          base44.entities.DiagnosticoScan.create({
-            data_hora: new Date().toISOString(),
-            metodo: method,
-            caixa: telemetry.caixa,
-            area_pct: telemetry.area_pct,
-            rotacionou: telemetry.rotacionou,
-            conferencia: isComplete ? "aprovou" : "reprovou",
-            resultado: isComplete ? "aplicado" : "original",
-            motivo: telemetry.motivo,
-            caixa_luminosidade: telemetry.caixa_luminosidade,
-            caixa_ia: telemetry.caixa_ia,
-          }).catch(() => {});
-
-          if (isComplete) {
-            currentFileRef.current = croppedFile;
-            await preloadAndSwap(croppedFile);
-            setCanRevert(true);
-          }
-        } else {
-          base44.entities.DiagnosticoScan.create({
-            data_hora: new Date().toISOString(),
-            metodo: method,
-            caixa: "",
-            area_pct: 0,
-            rotacionou: false,
-            conferencia: "nao_rodou",
-            resultado: "original",
-            motivo: telemetry.motivo,
-            caixa_luminosidade: telemetry.caixa_luminosidade,
-            caixa_ia: telemetry.caixa_ia,
-          }).catch(() => {});
-        }
-      } catch (err) {
-        console.error("[ChequePreviewDialog] Erro IA:", err);
-      } finally {
-        if (iaGuard.current === guardId) setIaStatus("");
-      }
-    })();
-
+    if (!open || !file) return undefined;
+    setMelhorar(true);
+    setOcupado(true);
+    mostrar(file).catch(() => setAchou("nao")).finally(() => setOcupado(false));
+    document.body.classList.add("overlay-open");
     return () => {
-      iaGuard.current = false;
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = "";
-      }
+      document.body.classList.remove("overlay-open");
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      urlRef.current = "";
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  useEffect(() => {
-    if (open) {
-      document.body.classList.add("overlay-open");
-      return () => document.body.classList.remove("overlay-open");
-    }
-  }, [open]);
+  }, [open, file]);
 
   if (!open || !file) return null;
 
-  const cancelIa = () => {
-    iaGuard.current = false;
-    setIaStatus("");
-  };
-
-  const handleRotate = async () => {
-    if (busy) return;
-    cancelIa();
-    setBusy(true);
+  const girar = async () => {
+    if (ocupado || !fonteRef.current) return;
+    setOcupado(true);
     try {
-      const img = await fileToImage(currentFileRef.current);
-      const canvas = rotateCanvas(img, 90);
-      const newFile = await canvasToFile(canvas, "cheque_rotated.jpg");
-      currentFileRef.current = newFile;
-      await preloadAndSwap(newFile);
-      setCanRevert(true);
-    } catch (err) {
-      console.error("[ChequePreviewDialog] Erro ao girar:", err);
+      await mostrar(girar90(fonteRef.current));
     } finally {
-      setBusy(false);
+      setOcupado(false);
     }
   };
 
-  const enterCrop = async () => {
-    if (busy) return;
-    cancelIa();
-    preCropFileRef.current = currentFileRef.current;
-    const origFile = originalFileRef.current;
-    currentFileRef.current = origFile;
-    const init = suggestedBoxRef.current || { x: 0.05, y: 0.05, w: 0.9, h: 0.9 };
-    setCrop(init);
-    setCropping(true);
-    await preloadAndSwap(origFile);
-  };
-
-  const cancelCrop = async () => {
-    if (preCropFileRef.current) {
-      currentFileRef.current = preCropFileRef.current;
-      await preloadAndSwap(preCropFileRef.current);
-    }
-    setCropping(false);
-    setCrop(null);
-  };
-
-  const confirmCrop = async () => {
-    if (busy || !crop) return;
-    setBusy(true);
+  const usar = async (comRecorte) => {
+    if (ocupado || !fonteRef.current) return;
+    setOcupado(true);
     try {
-      const img = await fileToImage(originalFileRef.current);
-      const sx = crop.x * img.naturalWidth;
-      const sy = crop.y * img.naturalHeight;
-      const sw = crop.w * img.naturalWidth;
-      const sh = crop.h * img.naturalHeight;
-      const canvas = document.createElement("canvas");
+      const img = fonteRef.current;
+      const c0 = comRecorte ? crop : CAIXA_INTEIRA;
+      const sx = c0.x * img.naturalWidth;
+      const sy = c0.y * img.naturalHeight;
+      const sw = c0.w * img.naturalWidth;
+      const sh = c0.h * img.naturalHeight;
+      let canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(sw));
       canvas.height = Math.max(1, Math.round(sh));
-      canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-      const newFile = await canvasToFile(canvas, "cheque_cropped.jpg");
-      currentFileRef.current = newFile;
-      await preloadAndSwap(newFile);
-      setCanRevert(true);
-      setCropping(false);
-      setCrop(null);
-    } catch (err) {
-      console.error("[ChequePreviewDialog] Erro ao recortar:", err);
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      if (comRecorte && canvas.height > canvas.width * 1.15) canvas = girar90(canvas);
+      if (melhorar) {
+        const c2 = canvas.getContext("2d", { willReadFrequently: true });
+        const dados = c2.getImageData(0, 0, canvas.width, canvas.height);
+        c2.putImageData(melhorarImagem(dados), 0, 0);
+      }
+      const base = (file.name || "cheque").replace(/\.[^.]+$/, "");
+      onChoose(await canvasParaArquivo(canvas, base + "_cheque.jpg"));
     } finally {
-      setBusy(false);
+      setOcupado(false);
     }
   };
 
-  const handleRevert = async () => {
-    if (busy) return;
-    cancelIa();
-    const origFile = originalFileRef.current;
-    currentFileRef.current = origFile;
-    await preloadAndSwap(origFile);
-    setCanRevert(false);
-    setCropping(false);
-    setCrop(null);
-  };
-
-  const startDrag = (e, handleId) => {
-    if (!cropping || !crop || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    dragRef.current = {
-      handleId,
-      startX: e.clientX,
-      startY: e.clientY,
-      startCrop: { ...crop },
-      rectW: rect.width,
-      rectH: rect.height,
-    };
-    try { containerRef.current.setPointerCapture(e.pointerId); } catch {}
+  const iniciarArrasto = (e, id) => {
+    if (!caixaRef.current) return;
+    const r = caixaRef.current.getBoundingClientRect();
+    arrastoRef.current = { id, x: e.clientX, y: e.clientY, crop: { ...crop }, w: r.width, h: r.height };
+    try { caixaRef.current.setPointerCapture(e.pointerId); } catch { /* sem captura */ }
     e.preventDefault();
+    e.stopPropagation();
   };
 
-  const onDragMove = (e) => {
-    const d = dragRef.current;
+  const mover = (e) => {
+    const d = arrastoRef.current;
     if (!d) return;
-
-    const dx = (e.clientX - d.startX) / d.rectW;
-    const dy = (e.clientY - d.startY) / d.rectH;
-    const sc = d.startCrop;
-
-    let left = sc.x;
-    let top = sc.y;
-    let right = sc.x + sc.w;
-    let bottom = sc.y + sc.h;
-
-    if (d.handleId === "move") {
-      const w = right - left;
-      const h = bottom - top;
-      left = Math.max(0, Math.min(left + dx, 1 - w));
-      top = Math.max(0, Math.min(top + dy, 1 - h));
-      right = left + w;
-      bottom = top + h;
+    const dx = (e.clientX - d.x) / d.w;
+    const dy = (e.clientY - d.y) / d.h;
+    let { x: l, y: t } = d.crop;
+    let rr = d.crop.x + d.crop.w;
+    let b = d.crop.y + d.crop.h;
+    if (d.id === "mover") {
+      const w = rr - l;
+      const h = b - t;
+      l = Math.max(0, Math.min(l + dx, 1 - w));
+      t = Math.max(0, Math.min(t + dy, 1 - h));
+      rr = l + w;
+      b = t + h;
     } else {
-      const handle = HANDLES.find((h) => h.id === d.handleId);
-      if (!handle) return;
-
-      if (handle.edges.left) {
-        left = Math.max(0, Math.min(left + dx, right - MIN_CROP));
-      }
-      if (handle.edges.right) {
-        right = Math.min(1, Math.max(right + dx, left + MIN_CROP));
-      }
-      if (handle.edges.top) {
-        top = Math.max(0, Math.min(top + dy, bottom - MIN_CROP));
-      }
-      if (handle.edges.bottom) {
-        bottom = Math.min(1, Math.max(bottom + dy, top + MIN_CROP));
-      }
+      const c = CANTOS.find((k) => k.id === d.id);
+      if (c.left) l = Math.max(0, Math.min(l + dx, rr - MIN_CROP));
+      if (c.right) rr = Math.min(1, Math.max(rr + dx, l + MIN_CROP));
+      if (c.top) t = Math.max(0, Math.min(t + dy, b - MIN_CROP));
+      if (c.bottom) b = Math.min(1, Math.max(b + dy, t + MIN_CROP));
     }
-
-    setCrop({ x: left, y: top, w: right - left, h: bottom - top });
+    setCrop({ x: l, y: t, w: rr - l, h: b - t });
   };
 
-  const endDrag = (e) => {
-    if (dragRef.current && containerRef.current) {
-      try { containerRef.current.releasePointerCapture(e.pointerId); } catch {}
+  const soltar = (e) => {
+    if (arrastoRef.current && caixaRef.current) {
+      try { caixaRef.current.releasePointerCapture(e.pointerId); } catch { /* nada */ }
     }
-    dragRef.current = null;
+    arrastoRef.current = null;
   };
 
-  const cropStyle = crop
-    ? { left: crop.x * 100 + "%", top: crop.y * 100 + "%", width: crop.w * 100 + "%", height: crop.h * 100 + "%" }
-    : null;
+  const estilo = { left: crop.x * 100 + "%", top: crop.y * 100 + "%", width: crop.w * 100 + "%", height: crop.h * 100 + "%" };
+  const aviso = ocupado
+    ? "Procurando o cheque na foto..."
+    : achou === "sim"
+      ? "Cheque encontrado. Se a moldura não pegou tudo, arraste os cantos."
+      : achou === "inteiro"
+        ? "O cheque ocupa a foto toda. Arraste os cantos se quiser cortar mais."
+        : "Não achei a borda do cheque. Arraste os cantos da moldura até ele.";
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="fixed inset-0 z-[9999] max-w-none w-screen h-[100dvh] max-h-none p-0 border-0 rounded-none sm:rounded-none bg-black overflow-hidden flex flex-col gap-0 translate-x-0 translate-y-0 shadow-none [&>button]:hidden">
-        <DialogTitle className="sr-only">Pré-visualização da foto do cheque</DialogTitle>
-        <div className="flex items-center justify-between px-4 py-3 text-white shrink-0">
-          <button
-            type="button"
-            onClick={() => { if (!busy) { if (canRevert || cropping) setShowDiscardConfirm(true); else onClose(); } }}
-            className="w-8 h-8 flex items-center justify-center text-white/80"
-          >
-            <X size={20} />
+    <Dialog open={open} onOpenChange={(o) => { if (!o && !ocupado) onClose(); }}>
+      <DialogContent className="fixed inset-0 z-[9999] max-w-none w-screen h-[100dvh] max-h-none p-0 border-0 rounded-none sm:rounded-none bg-black overflow-hidden flex flex-col gap-0 left-0 top-0 translate-x-0 translate-y-0 shadow-none [&>button:last-child]:hidden">
+        <DialogTitle className="sr-only">Foto do cheque</DialogTitle>
+        <div className="flex items-center justify-between px-2 pt-[max(0.5rem,env(safe-area-inset-top))] pb-1 text-white shrink-0">
+          <button type="button" onClick={onClose} disabled={ocupado} aria-label="Cancelar" className="w-11 h-11 flex items-center justify-center text-white/80">
+            <X size={22} />
           </button>
-          <span className="text-sm font-medium">Pré-visualização</span>
-          <div className="w-8" />
+          <span className="text-sm font-semibold">Foto do cheque</span>
+          <button type="button" onClick={girar} disabled={ocupado} aria-label="Girar a foto" className="w-11 h-11 flex items-center justify-center text-white/80">
+            <RotateCw size={20} />
+          </button>
         </div>
 
-        <div className="flex-1 flex items-center justify-center px-4 overflow-hidden min-h-0">
+        <p className="px-4 pb-2 text-center text-xs text-white/70 shrink-0" role="status">{aviso}</p>
+
+        <div className="flex-1 flex items-center justify-center px-6 overflow-hidden min-h-0">
           <div
-            ref={containerRef}
-            className="relative inline-block max-w-full max-h-full touch-none overflow-hidden"
-            onPointerMove={onDragMove}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            ref={caixaRef}
+            className="relative inline-block max-w-full max-h-full touch-none select-none"
+            onPointerMove={mover}
+            onPointerUp={soltar}
+            onPointerCancel={soltar}
           >
-            {displayUrl ? (
-              <img
-                src={displayUrl}
-                alt="Cheque"
-                className="block max-w-full max-h-[50vh] rounded-lg select-none"
-                draggable={false}
-              />
+            {url ? (
+              <img src={url} alt="Cheque" draggable={false} className="block max-w-full max-h-[calc(100dvh-15rem)] rounded-md" />
             ) : (
-              <div className="w-[300px] h-[200px] bg-gray-800 rounded-lg" />
-            )}
-
-            {iaStatus === "detectando" && (
-              <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/70 text-white text-xs px-2.5 py-1.5 rounded-md">
-                <Loader2 size={12} className="animate-spin" />
-                <span>IA analisando...</span>
+              <div className="w-[280px] h-[180px] flex items-center justify-center">
+                <Loader2 className="animate-spin text-white/60" />
               </div>
             )}
-
-            {iaStatus === "conferindo" && (
-              <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/70 text-white text-xs px-2.5 py-1.5 rounded-md">
-                <Loader2 size={12} className="animate-spin" />
-                <span>Conferindo recorte...</span>
-              </div>
-            )}
-
-            {crop && cropStyle && (
+            {url && (
               <div
-                className={`absolute border-2 ${cropping ? "border-emerald-400 cursor-move" : "border-emerald-500/60 pointer-events-none"}`}
-                style={{
-                  ...cropStyle,
-                  boxShadow: cropping ? "0 0 0 9999px rgba(0,0,0,0.5)" : "none",
-                }}
-                onPointerDown={(e) => { if (cropping) startDrag(e, "move"); }}
+                className="absolute border-2 border-emerald-400 cursor-move"
+                style={{ ...estilo, boxShadow: "0 0 0 9999px rgba(0,0,0,0.55)" }}
+                onPointerDown={(e) => iniciarArrasto(e, "mover")}
               >
-                {cropping && HANDLES.map((h) => (
+                {CANTOS.map((c) => (
                   <div
-                    key={h.id}
-                    className="absolute flex items-center justify-center touch-none"
-                    style={{
-                      left: h.pos.left,
-                      top: h.pos.top,
-                      transform: "translate(-50%, -50%)",
-                      width: "32px",
-                      height: "32px",
-                      cursor: h.cursor,
-                    }}
-                    onPointerDown={(e) => { e.stopPropagation(); startDrag(e, h.id); }}
+                    key={c.id}
+                    className="absolute w-11 h-11 flex items-center justify-center touch-none"
+                    style={{ ...c.pos, transform: "translate(-50%, -50%)" }}
+                    onPointerDown={(e) => iniciarArrasto(e, c.id)}
                   >
-                    <div className="w-3 h-3 bg-white border-2 border-emerald-500 rounded-sm" />
+                    <div className="w-5 h-5 rounded-full bg-white border-[3px] border-emerald-500 shadow" />
                   </div>
                 ))}
               </div>
@@ -414,104 +241,36 @@ export default function ChequePreviewDialog({ open, file, onChoose, onClose }) {
           </div>
         </div>
 
-        <div className="px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shrink-0 space-y-2 bg-black border-t border-white/10 relative z-30">
-          {!cropping ? (
-            <>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleRotate}
-                  disabled={busy}
-                  className="flex items-center gap-1 px-3 h-9 border border-white/20 text-white rounded-lg text-xs font-medium disabled:opacity-50"
-                >
-                  <RotateCw size={14} />
-                  Girar
-                </button>
-                <button
-                  type="button"
-                  onClick={enterCrop}
-                  disabled={busy}
-                  className="flex items-center gap-1 px-3 h-9 border border-white/20 text-white rounded-lg text-xs font-medium disabled:opacity-50"
-                >
-                  <Crop size={14} />
-                  Ajustar recorte
-                </button>
-                {canRevert && (
-                  <button
-                    type="button"
-                    onClick={handleRevert}
-                    disabled={busy}
-                    className="flex items-center gap-1 px-3 h-9 border border-emerald-400/40 text-emerald-300 rounded-lg text-xs font-medium disabled:opacity-50"
-                  >
-                    <Undo2 size={14} />
-                    Reverter recorte da IA
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => onChoose(originalFileRef.current)}
-                  disabled={busy}
-                  className="flex-1 h-11 border border-white/20 text-white/80 rounded-xl text-sm font-medium disabled:opacity-50"
-                >
-                  Usar original
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChoose(currentFileRef.current)}
-                  disabled={busy}
-                  className="flex-1 h-11 bg-emerald-600 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
-                >
-                  {busy ? "..." : "Usar esta"}
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={cancelCrop}
-                className="flex-1 h-11 border border-white/20 text-white rounded-xl text-sm font-medium"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={confirmCrop}
-                disabled={busy}
-                className="flex-1 h-11 bg-emerald-600 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
-              >
-                {busy ? "..." : "OK"}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {showDiscardConfirm && (
-          <div className="absolute inset-0 z-40 bg-black/80 flex items-center justify-center px-6">
-            <div className="bg-gray-900 rounded-2xl p-6 max-w-xs w-full text-center space-y-4">
-              <p className="text-white text-base font-semibold">Descartar alterações?</p>
-              <p className="text-white/60 text-sm">Suas edições serão perdidas.</p>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDiscardConfirm(false)}
-                  className="flex-1 h-11 border border-white/20 text-white rounded-xl text-sm font-medium"
-                >
-                  Voltar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowDiscardConfirm(false); onClose(); }}
-                  className="flex-1 h-11 bg-red-600 text-white rounded-xl text-sm font-semibold"
-                >
-                  Descartar
-                </button>
-              </div>
-            </div>
+        <div className="px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shrink-0 space-y-2 bg-black border-t border-white/10">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setMelhorar((m) => !m)}
+              aria-pressed={melhorar}
+              className={"h-11 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 border " + (melhorar ? "border-emerald-400 text-emerald-300" : "border-white/20 text-white/70")}
+            >
+              <Sparkles size={16} />
+              {melhorar ? "Melhorar: ligado" : "Melhorar: desligado"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCrop(CAIXA_INTEIRA)}
+              className="h-11 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 border border-white/20 text-white/80"
+            >
+              <Maximize2 size={16} />
+              Foto inteira
+            </button>
           </div>
-        )}
+          <button
+            type="button"
+            onClick={() => usar(true)}
+            disabled={ocupado || !url}
+            className="w-full h-12 bg-emerald-600 text-white rounded-xl text-base font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {ocupado ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
+            Usar foto
+          </button>
+        </div>
       </DialogContent>
     </Dialog>
   );
